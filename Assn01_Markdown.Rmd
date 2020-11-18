@@ -1,0 +1,462 @@
+---
+title: "Assn01"
+author: "Darren Clark"
+date: "17/11/2020"
+output: html_document
+---
+
+```{r}
+
+#  A01
+#  Darren Clark
+#  3092616
+#  2020-10-18
+
+#==============================================#
+#  Overview of Dataset                         #
+#==============================================#
+
+# Every five years NB Power conducts a survey with Residential customers.  The 
+# survey responses are crossed against consumption information included in the 
+# customer billing database. Currently this survey data is underutilized and I 
+# hope to expand its usefulness using the tools taught in this course.  The 
+# survey questions include questions about the home's configuration, size, 
+# occupants, heating systems and other end uses.  Note that the data is not 
+# public and must be kept in strict confidence.
+
+#==============================================#
+#  Read in Data, dplyr, ggplot, etc.           #
+#==============================================#
+
+getwd()
+EPS <- read.csv("2018 EPS Data - A01.csv", header = T)
+attach(EPS)
+library(dplyr)
+library(ggplot2)
+
+#==============================================#
+#  Data Scrubbing and Initial EDA              #
+#==============================================#
+
+# I did a lot of the scrubbing in excel prior to importing.  I removed entries
+# with invalid billing data and created two additional categorical columns for 
+# the penetration of electric heat.  There are 12 extra columns for some reason
+# so first step is to remove them.  I also want to add an annual usage column.
+
+EPS$X = NULL
+EPS$X.1 = NULL
+EPS$X.2 = NULL
+EPS$X.3 = NULL
+EPS$X.4 = NULL
+EPS$X.5 = NULL
+EPS$X.6 = NULL
+EPS$X.7 = NULL
+EPS$X.8 = NULL
+EPS$X.9 = NULL
+EPS$X.10 = NULL
+EPS$X.11 = NULL
+
+EPS$UsageTotal = Usage1+Usage2+Usage3+Usage4+Usage5+Usage6+Usage7+Usage8+Usage9+Usage10+Usage11+Usage12
+
+# Now I can begin to take a rough look at a few variables and correlate them to 
+# the annual usage.  Questions 59 - 65 mostly relate to the type of home:
+# Q59 = Type of home (categorical: e.g. two-storey, single storey, etc.)
+# Q61 = Square footage of home (cagorical)
+# Q64 = Age of home (categorical)
+# Q65 = Number of occupants (integer)
+# Note the responses to the categorical questions are represented with numbers.
+
+data1 <- EPS[,c("UsageTotal","Q59","Q61","Q64","Q65")]
+#Summary(data1$Q59)
+ggplot(data1,aes(Q59,..count..,)) + geom_bar()
+table(data1$Q59)
+
+# The plot doesn't give me something easy to read, though I know the meaning.  
+# The highest two categories are the single detached homes.  I will add data 
+# labels for these data.  
+
+# Remove missing data
+data2 <- data1 %>%
+    filter(is.na(Q59) == F)
+
+#Create bin function
+Q59_bin <- function(house=0) {
+  if(house==1)
+    return("Single Detached 1 Storey")
+  else if(house==2)
+    return("Single Detached - 2+ Storey")
+  else if(house==3)
+    return("Single Detached - Other")
+  else if(house==4)
+    return("Duplex/Rowhouse")  
+  else if(house==5)
+    return("Garden home / townhouse")
+  else if(house==6)
+    return("Apartment/Condominium")
+  else if(house==7)
+    return("Mini home")
+  else if(house==8)
+    return("Other")
+  else if(house==9)
+    return("NULL")
+}
+
+#Apply bin function
+data2$Q59A <- data2$Q59 %>%
+  sapply(Q59_bin) %>% as.factor()
+
+#Plot data
+ggplot(data2,aes(x = Q59A,y = ..count..)) + geom_bar()
+
+# Column bar plot labels look messy.  Switch to horizontal bars.
+ggplot(data2,aes(y = Q59A,x = ..count..)) + geom_bar()
+
+# Single detached homes are much more common than the other types.  It is 
+# currently unknown whether this is representative of sample only or if it 
+# applies to the broader population.
+
+#==========================================#
+# Impact on annual usage                   #
+#==========================================#
+
+
+# I want to look at the impact that home type has on the annual usage.  I will 
+# look at this first through a scatter plot and then through a box plot.
+
+# compare annual consumption to home type
+ggplot(data2,aes(x = UsageTotal, y = Q59A)) + geom_point()
+
+# clean up aethetics so data is readable
+ggplot(data2,aes(x = UsageTotal, y = Q59A)) + geom_jitter(width = 0, height = 0.3, alpha = 0.04)
+
+# compare to boxplot
+ggplot(data2,aes(x = UsageTotal, y = Q59A)) + geom_boxplot()
+
+# I like the view provided by the scatter plot as it is easier to get an idea 
+# of how many data items fit in each category.  However, the boxplots provide a 
+# cleaner summary so I will use those from this point forward.  I will create 
+# box plots for the other categories
+
+# For square footage of home, 1 is the smallest, 5 is the largest and 6 and 7 
+# represent "I don't know" and that the question was skipped, respectively
+
+data1$Q61A <- as.factor(data1$Q61)
+ggplot(data1,aes(x = UsageTotal, y = Q61A)) + geom_boxplot() + labs(title = "Home Size")
+
+# The larger homes seem to have higher consumption overall, butif we want to 
+# use this information later, we may need to filer out responses 6 and 7.
+# We will return to this later.
+
+# Next I look at impact that age of the home's impact.  Labels 1 to 7 are 
+# applied on the oldest to newest homes respectively.  Label 8 and 9 are for "I 
+# don't know" and those who didn't answer the question.
+
+data1$Q64A <- as.factor(data1$Q64)
+ggplot(data1,aes(x = UsageTotal, y = Q64A)) + geom_boxplot() + labs(title = "Home Age")
+
+# There is less of a clear trend through the different aged homes.
+
+# Finally we look at the number of people living in teh home.
+# The numerals 1-5 indicate the nmber of people living in the home with 6 
+# indicating 6 or more.  7 shows those who didn't answer the question.
+
+data1$Q65A <- as.factor(data1$Q65)
+ggplot(data1,aes(x = UsageTotal, y = Q65A)) + geom_boxplot() + labs(title = "Occupancy")
+
+# There is a trend of higher consumption from the homes with higher occupancy.
+
+#=======================================================#
+#  Building a model                                     #
+#=======================================================#
+
+# The preliminary EDA showed that Occupancy and home size seem to be related to 
+# consmption.  We will begin with a model examining these attributes.
+# First we will filter the results to remove the skipped or "I don't know" 
+# responses
+data3 <- data1 %>%
+  filter(Q65 < 6.5) %>%
+  filter(Q61 < 5.5)
+
+
+
+model1 <- lm(UsageTotal ~ Q65 + Q61, data1)
+model1
+
+# The coefficents show that a small home of less than 600 sqare feet with a 
+# single occupant uses base home uses on average 12,375 + 270 + 1,443 = 14,588 
+# kWh of electricity per year and additional people require an additional 1,443
+# kWh and additional floor space requires about 270.4 kWh per 600 sq ft.  These
+# results don't feel correct, and it is liekly that there is corelation between
+# home size and occupancy
+
+(cor(data3$Q65,data3$Q61))
+
+# The correlation is only 0.26, which is lower than I woudl have thought, but 
+# it means our model is better than I had thought.  We shoudl check the r-square
+# and other parameters of the regression coefficents.
+
+summary(model1)
+
+# while the coefficients are significant, the r-squared value is only 0.056, 
+# meaning that the majority of the variance remains unexplained.  We need to 
+# create a better model.
+
+#=======================================================#
+#  End Use Modelling                                    #
+#=======================================================#
+
+# This time we will dig into end uses captured by the survey to provide a better
+# estimate of the home's consumption.  It is well understood that some of the 
+# highest energy end uses are:
+#  - Electric Space Heating
+#  - Electric Water Heating
+#  - Pools and hot tubs 
+# I will pull first create a data set with these parameters and filter out 
+# survey responses with missing information, and "I don't know" responses.
+
+data4 <- EPS[,c("UsageTotal","Q17","Q21","Q41","Q53","Q59","Q61","Q65")]
+
+View(data4)
+
+# 6897 obs. before filtering.
+
+data4 <- data4 %>%
+  filter(Q17 < 2.5) %>%
+  filter(Q21 < 2.5) %>%
+  filter(Q41 < 7.5) %>%
+  filter(Q53 < 5.5) %>%
+  filter(Q59 < 7.5) %>%
+  filter(Q61 < 5.5) %>%
+  filter(Q65 < 6.5) %>%
+  filter(is.na(UsageTotal) == F)
+
+#3771 obs. after filtering.  This should still be enough for our modeling 
+
+View(data4)
+  
+# We will create binary Yes=1 or No=2 columns for Electric Heat, Space Heat and 
+# Pool/Hot tub ownership
+data4$pool = ((data4$Q17)-2)*(-1)+((data4$Q21)-2)*(-1)-((data4$Q17)-2)*((data4$Q21)-2)
+data4$heat = if_else(data4$Q41==1,1,0)
+data4$water = if_else(data4$Q53<2.5,1,0)
+
+# apply bins to home types and plot, mapping colors to end uses
+data4$Q59A <- data4$Q59 %>%
+  sapply(Q59_bin) %>% as.factor()
+ggplot(data4,aes(x = UsageTotal, y = Q59A, color = heat)) + geom_jitter(width = 0, height = 0.3, alpha = 0.04)
+ggplot(data4,aes(x = UsageTotal, y = Q59A, color = pool)) + geom_jitter(width = 0, height = 0.3, alpha = 0.04)
+ggplot(data4,aes(x = UsageTotal, y = Q59A, color = water)) + geom_jitter(width = 0, height = 0.3, alpha = 0.04)
+
+# In all three of these plots, the sources with teh specific end use thend to be
+# higher than the points without.  splitting the data slightly differently might 
+# all for more precise comparisons.  
+
+# We will split home type into just two categories:  detached and attached.
+# detached includes 1 storey, 2 stoery, other as well as mini homes
+# attached includes graden homes, duplexes, apartments/condos
+
+Q59_bin1 <- function(house=0) {
+  if(house==1)
+    return("Detached")
+  else if(house==2)
+    return("Detached")
+  else if(house==3)
+    return("Detached")
+  else if(house==4)
+    return("Attached")  
+  else if(house==5)
+    return("Attached")
+  else if(house==6)
+    return("Attached")
+  else if(house==7)
+    return("Detached")
+  else if(house==8)
+    return("Other")
+  else if(house==9)
+    return("NULL")
+}
+
+#Apply bin function
+data4$Q59A <- data4$Q59 %>%
+  sapply(Q59_bin1) %>% as.factor()
+
+# Now we nest a box plot with home type and hte end use factors
+
+ggplot(data4,aes(x = UsageTotal, y = Q59A, fill = as.factor(heat))) + geom_boxplot() + labs(title = "Space Heat")
+ggplot(data4,aes(x = UsageTotal, y = Q59A, fill = as.factor(water))) + geom_boxplot() + labs(title = "Elec Hot Water")
+ggplot(data4,aes(x = UsageTotal, y = Q59A, fill = as.factor(pool))) + geom_boxplot() + labs(title = "Pool")
+
+# All three factors seem to show increased electricity consumption
+
+#================================================#
+#  Build End Use Model                           #
+#================================================#
+
+# We will run a regression using the three end use parameters as well as 
+# our new home type indicator
+
+model2 <- lm(UsageTotal ~ heat + water + pool + Q59A, data = data4)
+summary(model2)
+
+#  All of the parameters are significant, but the r-squared value is still only 
+# 0.25, meaning that 75% of the variation is not being explained.  
+
+# Try adding an interactive term for home type and space heating
+
+model3 <- lm(UsageTotal ~ water + pool + Q59A*heat, data = data4)
+summary(model3)
+
+# This term doesn't improve the model, so it doesn't seem necessary
+
+#=================================================#
+#   Predicting Electric Space Heating             #
+#=================================================#
+
+# Because NB Power has consumption data readily available for all customers
+# from our billing system, we can analyze these consumption patterns to 
+# determine the likelihood of a customer having electric heat.
+
+# First we must set our data set up.  We will normalize consumption to 100 units
+# over the course of the year and then use the monthly consumptions to predict 
+# the presense of electric space heating.
+
+data5 <- EPS[,c("Q41","Q59","Usage1","Usage2","Usage3","Usage4", "Usage5","Usage6","Usage7","Usage8","Usage9","Usage10","Usage11","Usage12","UsageTotal")]
+View(data5)
+
+data5 <- data5 %>%
+  filter(Q41 < 7.5) %>%
+  filter(Q59 < 7.5) %>%
+  filter(is.na(UsageTotal) == F)
+
+#6761 obs.
+data5$heat = if_else(data5$Q41==1,1,0)
+data5$M1 = data5$Usage1 / data5$UsageTotal * 100
+data5$M2 = data5$Usage2 / data5$UsageTotal * 100
+data5$M3 = data5$Usage3 / data5$UsageTotal * 100
+data5$M4 = data5$Usage4 / data5$UsageTotal * 100
+data5$M5 = data5$Usage5 / data5$UsageTotal * 100
+data5$M6 = data5$Usage6 / data5$UsageTotal * 100
+data5$M7 = data5$Usage7 / data5$UsageTotal * 100
+data5$M8 = data5$Usage8 / data5$UsageTotal * 100
+data5$M9 = data5$Usage9 / data5$UsageTotal * 100
+data5$M10 = data5$Usage10 / data5$UsageTotal * 100
+data5$M11 = data5$Usage11 / data5$UsageTotal * 100
+data5$M12 = data5$Usage12 / data5$UsageTotal * 100
+data5$check = data5$M1 + data5$M2 + data5$M3 + data5$M4 + data5$M5 + data5$M6 + data5$M7 + data5$M8 + data5$M9 + data5$M10 + data5$M11 + data5$M12
+
+#Apply bin function on home type
+data5$Q59A <- data5$Q59 %>%
+  sapply(Q59_bin1) %>% as.factor()
+data5$heat = if_else(data5$Q41==1,1,0)
+
+# Now I will create a logistic regression ot predict electric heat.  first I
+# split my data into tow groups:  a training set and a test set (framework 
+# borrowed from datacamp)
+
+gp <- runif(nrow(data5))
+data5_train <- data5[gp < 0.75, ]
+data5_test <- data5[gp >= 0.75, ]
+
+model4 <- glm(heat~M1+M2+M3+M4+M5+M6+M7+M8+M9+M10+M11+as.factor(Q59A), data = data5_train, family = binomial)
+summary(model4)
+
+data5_test$pred <- predict(model4, newdata = data5_test, type = "response")
+
+# Examine ROC Curve
+# Note that I installed this once, but now it gives me an error, so I commented 
+# it out.
+
+# install.packages("pROC")
+library("pROC")
+ROC <- roc(data5_test$heat, data5_test$pred)
+plot(ROC, col = "blue")
+auc(ROC) 
+
+# Area under curve = 0.8243
+
+# Another way to examine accuracy is simply by checking the test data for the 
+# correct assignments.  examine accuracy.  Test various thresholds.  Start with 
+# N = 0.75
+
+N = 0.75
+
+data5_test$pred1 <- if_else(data5_test$pred > N, 1,0)
+
+data5_test$accuracy <- if_else(data5_test$pred1 == data5_test$heat,1,0)
+table(data5_test$accuracy)
+
+# The model correctly labelled 1169 homes and missed 483 for an average accuracy
+# of 71%.  Let's try drawing our threshold in a different place.
+
+N = 0.5
+
+data5_test$pred1 <- if_else(data5_test$pred > N, 1,0)
+
+data5_test$accuracy <- if_else(data5_test$pred1 == data5_test$heat,1,0)
+table(data5_test$accuracy)
+
+# After some iteration, N = 0.5, 0.6 and 0.4 give similar answers, so we will 
+# go with N = 0.5, where the model predicted the correct outcome 1276 of 1652
+# customers, an accuracy rate of 77%.
+
+#===================================================#
+#  Model refinement                                 #
+#===================================================#
+
+# Many of the monthly variables are not significant.  This is likely because 
+# the impact of electric heating affects some months similarly and they woudl
+# therfore be highly correlated.  WI will atempt to build a model with only two 
+# usage factors.  One for winter load and one for summer load.
+
+data5$win <- (data5$M9 + data5$M10 + data5$M11 + data5$M12)/4
+data5$sum <- (data5$M3 + data5$M4 + data5$M5 + data5$M6)/4
+
+data5_train <- data5[gp < 0.75, ]
+data5_test <- data5[gp >= 0.75, ]
+
+model5 <- glm(heat~win+sum+as.factor(Q59A), data = data5_train, family = binomial)
+summary(model5)
+
+# Each predictor is now significant
+
+data5_test$pred <- predict(model5, newdata = data5_test, type = "response")
+
+# Check ROC crve
+
+ROC <- roc(data5_test$heat, data5_test$pred)
+plot(ROC, col = "blue")
+auc(ROC) 
+
+# Area under curve = 0.8286
+
+N = 0.4
+
+data5_test$pred1 <- if_else(data5_test$pred > N, 1,0)
+
+data5_test$accuracy <- if_else(data5_test$pred1 == data5_test$heat,1,0)
+table(data5_test$accuracy)
+
+# After running a few iterations, N=0.4 gives a better result than N=0.3 or 0.5
+# Ther accuracy, however is similar to the prior model 1280 / 1652 = 77%.  We
+# have been able to maintain the same degree of accuracy with a much simpler 
+# model.  Area under the curve is also comparable with minimal loss in accuracy.
+
+# The model provides a reasonable assumption of accuracy, but is not 
+# perfect by any means.  One explanation for this is that while the question of 
+# whether or not a home is heated with electric heat seems binary, it is 
+# actually more complex than that.  Many homes have secondary heating systems
+# that could be electric or non-electric, so what we are actually measuring
+# is the outcome of whether or not the customer self identified as using 
+# electricity as their primary heating fuel.  That means if they used 51% 
+# electricity and 49% wood for fuel, they would respond as primarily electric,
+# while if it were 49% electric and 51% wood, they would identify as 
+# non-electric.  The self-identification process also assumes that the 
+# customer is knowledgeable enough to tell the difference.  The survey contains
+# additional level of detail on secondary heating systems, which I did not get 
+# into in detail, but in future analyses I would suggest exploring these.
+# In subsequent analyses I also hypothesize that a nearest neighbours analysis
+# may provide a good predictive analysis for these multiple degrees of electric
+# heat.
+
+# 
+```
