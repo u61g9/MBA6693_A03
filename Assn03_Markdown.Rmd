@@ -33,6 +33,10 @@ EPS <- read.csv("2018 EPS Data - A01.csv", header = T)
 attach(EPS)
 library(dplyr)
 library(ggplot2)
+library(Metrics)
+library("pROC")
+library(vtreat)
+library(leaps)
 
 #==============================================#
 #  Data Scrubbing and Initial EDA              #
@@ -216,7 +220,7 @@ summary(model1)
 
 data4 <- EPS[,c("UsageTotal","Q17","Q21","Q41","Q53","Q59","Q61","Q65")]
 
-View(data4)
+# View(data4)
 
 # 6897 obs. before filtering.
 
@@ -232,7 +236,7 @@ data4 <- data4 %>%
 
 #3771 obs. after filtering.  This should still be enough for our modeling 
 
-View(data4)
+# View(data4)
   
 # We will create binary Yes=1 or No=2 columns for Electric Heat, Space Heat and 
 # Pool/Hot tub ownership
@@ -319,7 +323,7 @@ First we must set our data set up.  We will normalize consumption to 100 units o
 
 ```{r}
 data5 <- EPS[,c("Q41","Q59","Usage1","Usage2","Usage3","Usage4", "Usage5","Usage6","Usage7","Usage8","Usage9","Usage10","Usage11","Usage12","UsageTotal")]
-View(data5)
+#View(data5)
 
 data5 <- data5 %>%
   filter(Q41 < 7.5) %>%
@@ -342,16 +346,17 @@ data5$M11 = data5$Usage11 / data5$UsageTotal * 100
 data5$M12 = data5$Usage12 / data5$UsageTotal * 100
 data5$check = data5$M1 + data5$M2 + data5$M3 + data5$M4 + data5$M5 + data5$M6 + data5$M7 + data5$M8 + data5$M9 + data5$M10 + data5$M11 + data5$M12
 
-#Apply bin function on home type
+#Apply bin function on home type (Q59A is designated as either a "Detached" home or an "Attached" home i.e. apartment, condo, row house, etc.)
 data5$Q59A <- data5$Q59 %>%
   sapply(Q59_bin1) %>% as.factor()
 data5$heat = if_else(data5$Q41==1,1,0)
 
 ```
 
-Now I will create a logistic regression ot predict electric heat.  First I split my data into two groups:  a training set and a test set (framework  borrowed from datacamp).  I will use this baseline for comparing to later with a full cross-validation.
+Now I will create a logistic regression to predict electric heat.  First I split my data into two groups:  a training set and a test set (framework  borrowed from datacamp).  I will use this baseline for comparing to later with a full cross-validation.
 
 ```{r}
+set.seed(33)
 gp <- runif(nrow(data5))
 data5_train <- data5[gp < 0.75, ]
 data5_test <- data5[gp >= 0.75, ]
@@ -366,34 +371,33 @@ data5_test$pred <- predict(model4, newdata = data5_test, type = "response")
 # it out.
 
 # install.packages("pROC")
-library("pROC")
+
 ROC <- roc(data5_test$heat, data5_test$pred)
 plot(ROC, col = "blue")
 auc(ROC) 
 
-# Area under curve = 0.8243
-
 # Another way to examine accuracy is simply by checking the test data for the 
 # correct assignments.  examine accuracy. 
-
-```{r}
 N = 0.5
-
 data5_test$pred1 <- if_else(data5_test$pred > N, 1,0)
-
 data5_test$accuracy <- if_else(data5_test$pred1 == data5_test$heat,1,0)
 table(data5_test$accuracy)
 ```
 
-After some iteration, N = 0.5, 0.6 and 0.4 give similar answers, and N = 0.75 is slightly worse, so we will  go with N = 0.5, where the model predicted the correct outcome 1276 of 1652 customers, an accuracy rate of 77%.
+I also want to look at RMSE as this will be a comparator I rely on later.
+
+```{r}
+rmse(data5_test$pred,data5_test$heat)
+```
 
 
   Model refinement                                 
 ====================================
 
-Many of the monthly variables are not significant.  This is likely because the impact of electric heating affects some months similarly and they would therfore be highly correlated.  WI will atempt to build a model with only two usage factors.  One for winter load and one for summer load.
+Many of the monthly variables are not significant.  This is likely because the impact of electric heating affects some months similarly and they would therfore be highly correlated.  We will atempt to build a model with only two usage factors.  One for winter load and one for summer load.
 
 ```{r}
+set.seed(32)
 data5$win <- (data5$M9 + data5$M10 + data5$M11 + data5$M12)/4
 data5$sum <- (data5$M3 + data5$M4 + data5$M5 + data5$M6)/4
 
@@ -408,12 +412,11 @@ summary(model5)
 data5_test$pred <- predict(model5, newdata = data5_test, type = "response")
 
 # Check ROC crve
-
-ROC <- roc(data5_test$heat, data5_test$pred)
-plot(ROC, col = "blue")
-auc(ROC) 
-
-# Area under curve = 0.8286
+set.seed(5)
+ROC1 <- roc(data5_test$heat, data5_test$pred)
+plot(ROC1, col = "blue")
+(auc(ROC1)) 
+(rmse(data5_test$heat, data5_test$pred))
 
 N = 0.4
 
@@ -421,39 +424,91 @@ data5_test$pred1 <- if_else(data5_test$pred > N, 1,0)
 
 data5_test$accuracy <- if_else(data5_test$pred1 == data5_test$heat,1,0)
 table(data5_test$accuracy)
+rmse(data5_test$accuracy,data5_test$heat)
 ```
 
 After running a few iterations, N=0.4 gives a better result than N=0.3 or 0.5. Their accuracy, however is similar to the prior model 1280 / 1652 = 77%.  We have been able to maintain the same degree of accuracy with a much simpler model.  Area under the curve is also comparable with minimal loss in accuracy.
 
-K-fold cross validation
+The RMSE of this model is slightly higher than the model with all of the parameters still within.  This could be the result of overfitting.  WE will check this later.  The next step is to refine the simplker model using k-fold cross validation.
+
+Step-wise model building using K-fold cross validation 
 ==============================
 
-We will do 10 fold cross validation, with most of the structure adapted from Datacamp.
-
-
 ```{r}
-library(vtreat)
+# Predict from a full model as a baseline
+
+model <- glm(heat~win+sum+as.factor(Q59A), data = data5, family = binomial)
+data5$pred <- predict(model, newdata = data5)
+# Get the rmse of the full model's predictions
+rmse(data5$pred,data5$heat)
+
+# Do 10-fold cross validation for the model.
+set.seed(42)
 nRows <- nrow(data5)
 splitPlan <- kWayCrossValidation(nRows,10,NULL,NULL)
-str(splitPlan)
+# str(splitPlan)
 
 k <- 10 # Number of folds
 data5$pred.cv <- 0 
 for(i in 1:k) {
   split <- splitPlan[[i]]
-  model <- glm(heat~win+sum+as.factor(Q59A), data = data5[split$train, ], family = binomial))
-  data5$pred.cv[split$app] <- predict(model, newdata = data5[split$app, ])
+  model <- glm(heat~win+sum+as.factor(Q59A), data = data5[split$train, ], family = binomial)
+data5$pred.cv[split$app] <- predict(model, newdata = data5[split$app, ])
 }
-
-# Predict from a full model
-data5$pred <- predict(lm(cty ~ hwy, data = mpg))
-
-# Get the rmse of the full model's predictions
-rmse(data5$pred, data5$heat)
-
 # Get the rmse of the cross-validation predictions
 rmse(data5$pred.cv, data5$heat)
 
+# The rmse is basically the same.  
+```
+Forward stepwise Model selection
+==================================
+
+We will build a model using forward stepwise method and validating iwth 10 fold cross validation.  The structure is adapted from the Introduction to Statistical Learning tutorials foudn online at: https://www.r-bloggers.com/2014/09/in-depth-introduction-to-machine-learning-in-15-hours-of-expert-videos/
+
+Note that this structure is for a linear model rather than a logistic model.  I was unable to troubleshoot a logistic model without the examples provided in datacamp and from the ISL textbook website.
+
+```{r}
+data6 = data5[,c("heat","M1","M2","M3","M4","M5","M6","M7","M8","M9","M10","M11","Q59A")]
+data6$Q59A <- if_else(data6$Q59A=="Attached",1,0)
+set.seed(10)
+folds=sample(rep(1:10,length=nrow(data6)))
+table(folds)
+cv.errors=matrix(NA,10,12)
+# Write prediction method
+predict.regsubsets=function(object,newdata,id,...){
+  form=as.formula(object$call[[2]])
+  mat=model.matrix(form,newdata)
+  coefi=coef(object,id=id)
+  mat[,names(coefi)]%*%coefi
+}
+
+for(k in 1:10){
+  best.fit=regsubsets(heat~.,data=data6[folds!=k,],nvmax=12,method="forward")
+  for(i in 1:12){
+    pred=predict(best.fit,data6[folds==k,],id=i)
+    cv.errors[k,i]=mean((data6$heat[folds==k]-pred)^2)
+  }
+}
+rmse.cv=sqrt(apply(cv.errors,2,mean))
+plot(rmse.cv,pch=12,type="b")
+
+# Compare to backward subset selection
+
+for(k in 1:10){
+  best.fit=regsubsets(heat~.,data=data6[folds!=k,],nvmax=12,method="backward")
+  for(i in 1:12){
+    pred=predict(best.fit,data6[folds==k,],id=i)
+    cv.errors[k,i]=mean((data6$heat[folds==k]-pred)^2)
+  }
+}
+rmse.cv=sqrt(apply(cv.errors,2,mean))
+plot(rmse.cv,pch=12,type="b")
+
+
 ```
 
-The model provides a reasonable assumption of accuracy, but is not perfect by any means.  One explanation for this is that while the question of whether or not a home is heated with electric heat seems binary, it is actually more complex than that.  Many homes have secondary heating system that could be electric or non-electric, so what we are actually measuring is the outcome of whether or not the customer self identified as using electricity as their primary heating fuel.  That means if they used 51% electricity and 49% wood for fuel, they would respond as primarily electric, while if it were 49% electric and 51% wood, they would identify as non-electric.  The self-identification process also assumes that the customer is knowledgeable enough to tell the difference.  The survey contains additional level of detail on secondary heating systems, which I did not get into in detail, but in future analyses I would suggest exploring these. In subsequent analyses I also hypothesize that a nearest neighbours analysis may provide a good predictive analysis for these multiple degrees of electric heat.
+The forward stepwise regression with all 12 terms is identical to the model prepared in the first section, but gives a slightly worse RMSE.  I believe this is the impact fo using a linear model for the step-wise regressions instead of a logistic regression.  The relative accuracy of the model is, however likely to correlate to a logistic model, so it is likely that somewhere in the range of 5 to 7 terms is sufficient.  
+
+The forward step-wise model gets to a lower RMSE with fewer terms than the backward step-wise model, so in methods that would prioritize smaller models (Cp, Adj. R0square, etc.), this apprears to be giving better results than backward step-wise regression.  
+
+Overall, the model provides a reasonable assumption of accuracy, but is not perfect by any means.  One explanation for this is that while the question of whether or not a home is heated with electric heat seems binary, it is actually more complex than that.  Many homes have secondary heating system that could be electric or non-electric, so what we are actually measuring is the outcome of whether or not the customer self identified as using electricity as their primary heating fuel.  That means if they used 51% electricity and 49% wood for fuel, they would respond as primarily electric, while if it were 49% electric and 51% wood, they would identify as non-electric.  The self-identification process also assumes that the customer is knowledgeable enough to tell the difference.  The survey contains additional level of detail on secondary heating systems, which I did not get into in detail, but in future analyses I would suggest exploring these. In subsequent analyses I also hypothesize that a nearest neighbours analysis may provide a good predictive analysis for these multiple degrees of electric heat.
